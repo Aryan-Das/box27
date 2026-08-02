@@ -61,9 +61,12 @@ public:
             }
             else if(bytes_received == 0) break;
             else{
+                std::stringstream httpResponse; 
                 ParseResult parsed = parseHttp(buffer, bytes_received);
                 if(parsed.result < 0){
                     std::cerr << "HTTP parse failed with error code: " << parsed.result << "\n";
+                    const char* errorMessage = "400 Error: Bad Request";
+                    httpResponse << "HTTP/1.1 400 BAD REQUEST\r\nContent-Length: " << strlen(errorMessage) << "\r\n\r\n" << errorMessage;
                 }
                 else{
                     HTTPRequest req = parsed.req;
@@ -72,20 +75,23 @@ public:
                     std::ifstream file(req.path.substr(1));
                     if (!file.is_open()) {
                         std::cerr << "file opening failed: " << req.path << " \n" << std::endl;
+                        const char* errorMessage = "404 Error: File Not Found";
+                        httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " << strlen(errorMessage) << "\r\n\r\n" << errorMessage;
                     }
                     else{
                         std::stringstream fileBuf;
                         fileBuf << file.rdbuf();
                         std::string fileContents = fileBuf.str();
-                        std::stringstream httpResponse; 
+                        
                         httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " << fileContents.size() << "\r\n\r\n" << fileContents;
-                        int bytes_sent = write(clientFd, httpResponse.str().c_str(), httpResponse.str().size());
-                        if(bytes_sent < 0){
-                            int err_code = errno; 
-                            std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
-                        }
+                        
                     }
                     
+                }
+                int bytes_sent = write(clientFd, httpResponse.str().c_str(), httpResponse.str().size());
+                if(bytes_sent < 0){
+                    int err_code = errno; 
+                    std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
                 }
                 
             }   
@@ -116,9 +122,13 @@ private:
     };
 
     ParseResult parseHttp(char* buf, uint32_t len){
-        std::vector<std::string_view> lines = split(std::string_view(buf, len), "\r\n");
+        std::string_view view = std::string_view(buf, len);
+        std::vector<std::string_view> lines = split(view, "\r\n");
         std::vector<std::string_view> firstLineTokens = split(lines[0], " ");
-        if (lines.size() < 1 || firstLineTokens.size() < 2){
+        if (firstLineTokens.size() != 3 
+            || view.find("\r\n") == std::string_view::npos
+            || firstLineTokens[1][0] != '/'
+        ){
             return ParseResult{-1, HTTPRequest{"", ""}};
         }
         HTTPRequest req {
@@ -132,7 +142,7 @@ private:
 
 
 int main() {
-    Server server(3000);
+    Server server(8080);
     while(true){
         server.acceptNewClient();
         
