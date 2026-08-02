@@ -69,7 +69,7 @@ public:
                     const char* errorMessage = "400 Error: Bad Request";
                     httpResponse << "HTTP/1.1 400 BAD REQUEST\r\nContent-Length: "
                                 << strlen(errorMessage) << "\r\n"
-                                << "Content-Type: " << "text/plain" << "\r\n"
+                                << "Content-Type: " << "text/plain" 
                                 << "\r\n\r\n" 
                                 << errorMessage;
                 }
@@ -83,7 +83,7 @@ public:
                         const char* errorMessage = "404 Error: File Not Found";
                         httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
                                     << strlen(errorMessage) << "\r\n"
-                                    << "Content-Type: " << "text/plain" << "\r\n"
+                                    << "Content-Type: " << "text/plain"
                                     << "\r\n\r\n" << errorMessage;
                     }
                     else{
@@ -94,7 +94,7 @@ public:
                         
                         httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " 
                                     << fileContents.size() << "\r\n"
-                                    << "Content-Type: " << getMimeType(req.path) << "\r\n"
+                                    << "Content-Type: " << getMimeType(req.path) 
                                     << "\r\n\r\n" << fileContents;
                         
                     }
