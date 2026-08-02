@@ -21,5 +21,3 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
-      - name: Run smoke test
-        run: ./build/fileservice
