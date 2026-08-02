@@ -1,0 +1,3 @@
+/workspaces/cloud-file-service/build/CMakeFiles/fileservice.dir
+/workspaces/cloud-file-service/build/CMakeFiles/edit_cache.dir
+/workspaces/cloud-file-service/build/CMakeFiles/rebuild_cache.dir
