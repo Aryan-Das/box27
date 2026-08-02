@@ -5,13 +5,18 @@
 #include <cstring>
 #include <cerrno>
 #include <stdexcept>
+#include <vector>
+#include <string>
+
+#include "utils.hpp"
+
 
 class Server{
 public:
     Server(uint32_t port)
     : fd_ { socket(AF_INET, SOCK_STREAM, 0) }
     , serverAddress_ { }
-    , running { true }
+    , running_ { true }
     {
         serverAddress_.sin_family = AF_INET;
         serverAddress_.sin_port = htons(port);
@@ -54,11 +59,20 @@ public:
             }
             else if(bytes_received == 0) break;
             else{
-                int bytes_sent = write(clientFd, buffer, bytes_received);
-                if(bytes_sent < 0){
-                    int err_code = errno; 
-                    std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+                ParseResult parsed = parseHttp(buffer, bytes_received);
+                if(parsed.result < 0){
+                    std::cerr << "HTTP parse failed with error code: " << parsed.result << "\n";
                 }
+                else{
+                    HTTPRequest req = parsed.req;
+                    std::string test_print = "Method: " + req.method + "; Path: " + req.path;
+                    int bytes_sent = write(clientFd, test_print.c_str(), test_print.size());
+                    if(bytes_sent < 0){
+                        int err_code = errno; 
+                        std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+                    }
+                }
+                
             }   
             
             
@@ -67,20 +81,43 @@ public:
         close(clientFd);
     }
 
+    
 
     ~Server(){
-        running = false;
+        running_ = false;
         close(fd_);
     }
 private:
     int fd_;
     sockaddr_in serverAddress_;
-    bool running;
+    bool running_;
+    struct HTTPRequest{
+        std::string method;
+        std::string path;
+    };
+    struct ParseResult{
+        int result; // error code. For now, 0 = success, -1 = failure.
+        HTTPRequest req;
+    };
+
+    ParseResult parseHttp(char* buf, uint32_t len){
+        std::vector<std::string_view> lines = split(std::string_view(buf, len), "\r\n");
+        std::vector<std::string_view> firstLineTokens = split(lines[0], " ");
+        if (lines.size() < 1 || firstLineTokens.size() < 2){
+            return ParseResult{-1, HTTPRequest{"", ""}};
+        }
+        HTTPRequest req {
+            std::string(firstLineTokens[0]),
+            std::string(firstLineTokens[1])
+        };
+        return ParseResult{0, req};
+         
+    }
 };
 
 
 int main() {
-    Server server(8080);
+    Server server(3000);
     while(true){
         server.acceptNewClient();
         
