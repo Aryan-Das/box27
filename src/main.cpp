@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <vector>
 #include <string>
+#include <fstream>
+#include <sstream>
 
 #include "utils.hpp"
 
@@ -66,11 +68,24 @@ public:
                 else{
                     HTTPRequest req = parsed.req;
                     std::string test_print = "Method: " + req.method + "; Path: " + req.path;
-                    int bytes_sent = write(clientFd, test_print.c_str(), test_print.size());
-                    if(bytes_sent < 0){
-                        int err_code = errno; 
-                        std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+                    
+                    std::ifstream file(req.path.substr(1));
+                    if (!file.is_open()) {
+                        std::cerr << "file opening failed: " << req.path << " \n" << std::endl;
                     }
+                    else{
+                        std::stringstream fileBuf;
+                        fileBuf << file.rdbuf();
+                        std::string fileContents = fileBuf.str();
+                        std::stringstream httpResponse; 
+                        httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " << fileContents.size() << "\r\n\r\n" << fileContents;
+                        int bytes_sent = write(clientFd, httpResponse.str().c_str(), httpResponse.str().size());
+                        if(bytes_sent < 0){
+                            int err_code = errno; 
+                            std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+                        }
+                    }
+                    
                 }
                 
             }   
