@@ -9,9 +9,10 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <unordered_map>
 
 #include "utils.hpp"
-
+#include "mime.hpp"
 
 class Server{
 public:
@@ -66,7 +67,11 @@ public:
                 if(parsed.result < 0){
                     std::cerr << "HTTP parse failed with error code: " << parsed.result << "\n";
                     const char* errorMessage = "400 Error: Bad Request";
-                    httpResponse << "HTTP/1.1 400 BAD REQUEST\r\nContent-Length: " << strlen(errorMessage) << "\r\n\r\n" << errorMessage;
+                    httpResponse << "HTTP/1.1 400 BAD REQUEST\r\nContent-Length: "
+                                << strlen(errorMessage) << "\r\n"
+                                << "Content-Type: " << "text/plain" << "\r\n"
+                                << "\r\n\r\n" 
+                                << errorMessage;
                 }
                 else{
                     HTTPRequest req = parsed.req;
@@ -76,14 +81,21 @@ public:
                     if (!file.is_open()) {
                         std::cerr << "file opening failed: " << req.path << " \n" << std::endl;
                         const char* errorMessage = "404 Error: File Not Found";
-                        httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " << strlen(errorMessage) << "\r\n\r\n" << errorMessage;
+                        httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
+                                    << strlen(errorMessage) << "\r\n"
+                                    << "Content-Type: " << "text/plain" << "\r\n"
+                                    << "\r\n\r\n" << errorMessage;
                     }
                     else{
+                        
                         std::stringstream fileBuf;
                         fileBuf << file.rdbuf();
                         std::string fileContents = fileBuf.str();
                         
-                        httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " << fileContents.size() << "\r\n\r\n" << fileContents;
+                        httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " 
+                                    << fileContents.size() << "\r\n"
+                                    << "Content-Type: " << getMimeType(req.path) << "\r\n"
+                                    << "\r\n\r\n" << fileContents;
                         
                     }
                     
@@ -112,6 +124,8 @@ private:
     int fd_;
     sockaddr_in serverAddress_;
     bool running_;
+   
+
     struct HTTPRequest{
         std::string method;
         std::string path;
