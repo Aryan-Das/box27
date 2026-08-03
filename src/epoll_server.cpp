@@ -12,9 +12,11 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include <mutex>
 
 #include "utils.hpp"
 #include "mime.hpp"
+#include "thread_pool.hpp"
 
 constexpr int MAX = 1000;
 
@@ -27,6 +29,7 @@ public:
     , serverAddress_ { }
     , ev { }
     , running_ { true }
+    , threadPool_ { 16 }
     {
         serverAddress_.sin_family = AF_INET;
         serverAddress_.sin_port = htons(port);
@@ -37,7 +40,7 @@ public:
             std::cerr << "bind failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
             throw std::runtime_error("Failed to bind socket");
         }
-        if(listen(fd_, 10) < 0) {
+        if(listen(fd_, 512) < 0) {
             int err_code = errno; 
             std::cerr << "listen failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
             throw std::runtime_error("Failed to listen to socket");
@@ -82,11 +85,15 @@ public:
                         }
                     }
                     else{
-                        if(!handleClient(evList[i].data.fd)){
-                            epoll_ctl(epollFd_, EPOLL_CTL_DEL, evList[i].data.fd, &evList[i]);
-                            close(evList[i].data.fd);
-                            
+                        std::lock_guard lock(fdsMutex_);
+                        int clientFd = evList[i].data.fd;
+                        if(!fdsBeingProcessed_.contains(clientFd)) {
+                            fdsBeingProcessed_.insert(clientFd);
+                            threadPool_.push([this, clientFd](){
+                                handleClient(clientFd);
+                            });
                         }
+                        
                     }
                 }
             }
@@ -95,15 +102,29 @@ public:
     
     
     bool handleClient(int clientFd){
-    
+      
         char buffer[1024] = { 0 };
         int bytes_received = recv(clientFd, buffer, sizeof(buffer), 0);
         if(bytes_received < 0){
             int err_code = errno; 
-            std::cerr << "recv failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+            if(err_code != 11)
+                std::cerr << "recv failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+            std::lock_guard lock(fdsMutex_);
+            {   
+                fdsBeingProcessed_.erase(clientFd);
+            }
             return false;
         }
-        else if(bytes_received == 0) return false;
+        else if(bytes_received == 0){
+            epoll_ctl(epollFd_, EPOLL_CTL_DEL, clientFd, nullptr);
+            close(clientFd);
+            
+            {   
+                std::lock_guard lock(fdsMutex_);
+                fdsBeingProcessed_.erase(clientFd);
+            }
+            return false;
+        }
         else{
             std::stringstream httpResponse; 
             ParseResult parsed = parseHttp(buffer, bytes_received);
@@ -140,7 +161,7 @@ public:
                                 << "\r\n\r\n" << fileContents;
                     
                 }
-                
+          
             }
             int bytes_sent = write(clientFd, httpResponse.str().c_str(), httpResponse.str().size());
             if(bytes_sent < 0){
@@ -150,6 +171,11 @@ public:
             
             
         }   
+        
+        {   
+            std::lock_guard lock(fdsMutex_);
+            fdsBeingProcessed_.erase(clientFd);
+        }
         
         return true;
         
@@ -172,7 +198,10 @@ private:
     struct epoll_event evList[MAX];
 
     bool running_;
-   
+
+    std::unordered_set<int> fdsBeingProcessed_;
+    ThreadPool threadPool_;
+    std::mutex fdsMutex_;
 
     struct HTTPRequest{
         std::string method;
