@@ -11,3 +11,4 @@ endif()
 add_compile_options(-Wall -Wextra)
 
 add_executable(fileservice src/main.cpp)
+add_executable(fileservice_epoll src/epoll_server.cpp)

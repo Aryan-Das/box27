@@ -86,8 +86,7 @@ public:
                                     << "Content-Type: " << "text/plain"
                                     << "\r\n\r\n" << errorMessage;
                     }
-                    else{
-                        
+                    else{                        
                         std::stringstream fileBuf;
                         fileBuf << file.rdbuf();
                         std::string fileContents = fileBuf.str();
