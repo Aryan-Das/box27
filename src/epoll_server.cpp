@@ -108,10 +108,11 @@ public:
     
     
     bool handleClient(int clientFd){
-      
+        
         char buffer[1024] = { 0 };
         int bytes_received = recv(clientFd, buffer, sizeof(buffer), 0);
         bool sentfile = false;
+        FdGuard fdGuard {fdsBeingProcessed_, fdsMutex_, clientFd};
         if(bytes_received < 0){
             int err_code = errno; 
             if(err_code != 11)
@@ -126,10 +127,6 @@ public:
             epoll_ctl(epollFd_, EPOLL_CTL_DEL, clientFd, nullptr);
             close(clientFd);
             
-            {   
-                std::lock_guard lock(fdsMutex_);
-                fdsBeingProcessed_.erase(clientFd);
-            }
             return false;
         }
         else{
@@ -183,11 +180,14 @@ public:
                                             close(clientFd);
                                             return false;
                                         }
+                                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
                                         continue;
                                     }
                                     else
                                         std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";                               
                                     
+                                }else{
+                                    eagainRetries = 10;
                                 }
                                 if(bytes_sent == 0) break;
                                 bytes_written += bytes_sent;
@@ -195,7 +195,7 @@ public:
                             if(bytes_written >= total_size){
                                 off_t offset = 0;
                                 size_t remaining_bytes = size;
-                                int eagainRetries = 10;
+                                int eagainRetries = 500;
                                 while(remaining_bytes > 0){
                                     ssize_t sent = sendfile(clientFd, fd, &offset, size);
                                     if(sent < 0){
@@ -206,6 +206,7 @@ public:
                                                 close(clientFd);
                                                 return false;
                                             }
+                                            std::this_thread::sleep_for(std::chrono::milliseconds(1));
                                             continue;
                                         }
                                         else {
@@ -218,6 +219,8 @@ public:
                                             break;
                                         }
                                         
+                                    }else{
+                                        eagainRetries = 20;
                                     }
                                     remaining_bytes -= sent;
                                 }
@@ -316,7 +319,15 @@ private:
         int result; // error code. For now, 0 = success, -1 = failure.
         HTTPRequest req;
     };
-
+    struct FdGuard {
+        std::unordered_set<int>& set;
+        std::mutex& mtx;
+        int fd;
+        ~FdGuard() {
+            std::lock_guard lock(mtx);
+            set.erase(fd);
+        }
+    };
     ParseResult parseHttp(char* buf, uint32_t len){
         std::string_view view = std::string_view(buf, len);
         std::vector<std::string_view> lines = split(view, "\r\n");
