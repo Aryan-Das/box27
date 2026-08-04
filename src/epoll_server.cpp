@@ -13,10 +13,12 @@
 #include <sstream>
 #include <unordered_map>
 #include <mutex>
+#include <optional>
 
 #include "utils.hpp"
 #include "mime.hpp"
 #include "thread_pool.hpp"
+#include "lru_cache.hpp"
 
 constexpr int MAX = 1000;
 
@@ -30,6 +32,7 @@ public:
     , ev { }
     , running_ { true }
     , threadPool_ { 16 }
+    , cache_ {1000}
     {
         serverAddress_.sin_family = AF_INET;
         serverAddress_.sin_port = htons(port);
@@ -141,26 +144,38 @@ public:
                 HTTPRequest req = parsed.req;
                 std::string test_print = "Method: " + req.method + "; Path: " + req.path;
                 
-                std::ifstream file(req.path.substr(1));
-                if (!file.is_open()) {
-                    std::cerr << "file opening failed: " << req.path << " \n" << std::endl;
-                    const char* errorMessage = "404 Error: File Not Found";
-                    httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
-                                << strlen(errorMessage) << "\r\n"
-                                << "Content-Type: " << "text/plain"
-                                << "\r\n\r\n" << errorMessage;
-                }
-                else{                        
-                    std::stringstream fileBuf;
-                    fileBuf << file.rdbuf();
-                    std::string fileContents = fileBuf.str();
-                    
+                std::string fileContents; 
+                auto cacheResult = cache_.get(req.path.substr(1));
+                if(cacheResult == std::nullopt){
+                    std::ifstream file(req.path.substr(1));
+                    if (!file.is_open()) {
+                        std::cerr << "file opening failed: " << req.path << " \n" << std::endl;
+                        const char* errorMessage = "404 Error: File Not Found";
+                        httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
+                                    << strlen(errorMessage) << "\r\n"
+                                    << "Content-Type: " << "text/plain"
+                                    << "\r\n\r\n" << errorMessage;
+                    }
+                    else{                        
+                        std::stringstream fileBuf;
+                        fileBuf << file.rdbuf();
+                        fileContents = fileBuf.str();
+                        cache_.put(req.path.substr(1), fileContents);
+                        httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " 
+                                    << fileContents.size() << "\r\n"
+                                    << "Content-Type: " << getMimeType(req.path) 
+                                    << "\r\n\r\n" << fileContents;
+                        
+                    }
+                } 
+                else{
+                    fileContents = std::move(cacheResult.value());
                     httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " 
-                                << fileContents.size() << "\r\n"
-                                << "Content-Type: " << getMimeType(req.path) 
-                                << "\r\n\r\n" << fileContents;
-                    
+                                    << fileContents.size() << "\r\n"
+                                    << "Content-Type: " << getMimeType(req.path) 
+                                    << "\r\n\r\n" << fileContents;
                 }
+                
           
             }
             int bytes_sent = write(clientFd, httpResponse.str().c_str(), httpResponse.str().size());
@@ -202,6 +217,8 @@ private:
     std::unordered_set<int> fdsBeingProcessed_;
     ThreadPool threadPool_;
     std::mutex fdsMutex_;
+
+    LRUCache cache_;
 
     struct HTTPRequest{
         std::string method;
