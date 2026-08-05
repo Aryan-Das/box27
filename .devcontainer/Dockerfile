@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     wget \
     pkg-config \
     libpq-dev \
+    libpqxx-dev \
     postgresql-client \
     libssl-dev \
     net-tools \

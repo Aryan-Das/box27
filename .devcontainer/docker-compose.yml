@@ -1,0 +1,27 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/workspace:cached
+    command: sleep infinity
+    depends_on:
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://fileservice:devpassword@postgres:5432/fileservice
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=fileservice
+      - POSTGRES_PASSWORD=devpassword
+      - POSTGRES_DB=fileservice
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  pgdata:
