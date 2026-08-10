@@ -28,14 +28,14 @@ constexpr int MAX = 1000;
 
 class Server{
 public:
-    Server(uint32_t port)
+    Server(uint32_t port, int threads, int cacheCapacity)
     : fd_ { socket(AF_INET, SOCK_STREAM, 0) }
     , epollFd_ {epoll_create1(0)}
     , serverAddress_ { }
     , ev { }
     , running_ { true }
-    , threadPool_ { 16 }
-    , cache_ {1000}
+    , threadPool_ { threads }
+    , cache_ {cacheCapacity}
     {
         serverAddress_.sin_family = AF_INET;
         serverAddress_.sin_port = htons(port);
@@ -349,7 +349,7 @@ private:
 
 
 int main() {
-    Server server(8080);
+    Server server(8080, 16, 1000);
     server.main();
     return 0;
 }
