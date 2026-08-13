@@ -26,9 +26,11 @@
 constexpr int MAX = 1000;
 
 
+
+
 class Server{
 public:
-    Server(uint32_t port, int threads, int cacheCapacity)
+    Server(uint32_t port, size_t threads, size_t cacheCapacity)
     : fd_ { socket(AF_INET, SOCK_STREAM, 0) }
     , epollFd_ {epoll_create1(0)}
     , serverAddress_ { }
@@ -108,7 +110,7 @@ public:
     
     
     bool handleClient(int clientFd){
-        
+      
         char buffer[1024] = { 0 };
         int bytes_received = recv(clientFd, buffer, sizeof(buffer), 0);
         bool sentfile = false;
@@ -117,10 +119,7 @@ public:
             int err_code = errno; 
             if(err_code != 11)
                 std::cerr << "recv failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
-            std::lock_guard lock(fdsMutex_);
-            {   
-                fdsBeingProcessed_.erase(clientFd);
-            }
+           
             return false;
         }
         else if(bytes_received == 0){
@@ -176,6 +175,7 @@ public:
                                     int err_code = errno; 
                                     if(err_code == EAGAIN){
                                         --eagainRetries;
+                                        std::cerr << "EAGAIN Retry";
                                         if(eagainRetries <= 0){
                                             close(clientFd);
                                             return false;
@@ -229,6 +229,20 @@ public:
                              
 
                             }
+                            if(size < cachingThreshold_){
+                                std::ifstream file(req.path.substr(1));
+                                if (!file.is_open()) {
+                                    std::cerr << "file opening failed: " << req.path << " \n" << std::endl;
+                                }
+                                else{                        
+                                    std::stringstream fileBuf;
+                                    fileBuf << file.rdbuf();
+                                    fileContents = fileBuf.str();
+                                    cache_.put(req.path.substr(1), fileContents);
+                                    
+                                }
+                            }
+                            
                         }
                         else{
                             int err_code = errno; 
@@ -241,19 +255,9 @@ public:
                         }
                     }
                     
-
-
-                    // std::ifstream file(req.path.substr(1));
-                    // if (!file.is_open()) {
-                    //     std::cerr << "file opening failed: " << req.path << " \n" << std::endl;
-                    // }
-                    // else{                        
-                    //     std::stringstream fileBuf;
-                    //     fileBuf << file.rdbuf();
-                    //     fileContents = fileBuf.str();
-                    //     //cache_.put(req.path.substr(1), fileContents);
-                        
-                    // }
+                     
+                    
+                    
                     close(fd);
                 } 
                 else{
@@ -304,10 +308,23 @@ private:
     struct epoll_event evList[MAX];
 
     bool running_;
+    const size_t cachingThreshold_ = 5000000;
 
     std::unordered_set<int> fdsBeingProcessed_;
     ThreadPool threadPool_;
     std::mutex fdsMutex_;
+
+    enum ConnectionStateType{
+        Receiving,
+        Complete
+    };
+    struct ConnectionState{
+        std::string buffer;
+        std::optional<size_t> contentLength;
+        ConnectionStateType state = Receiving;
+    };
+    std::unordered_map<int, ConnectionState> connectionStates_;
+    std::mutex connectionStatesMutex_;
 
     LRUCache cache_;
 
@@ -328,6 +345,9 @@ private:
             set.erase(fd);
         }
     };
+    
+
+
     ParseResult parseHttp(char* buf, uint32_t len){
         std::string_view view = std::string_view(buf, len);
         std::vector<std::string_view> lines = split(view, "\r\n");

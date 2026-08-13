@@ -11,11 +11,11 @@
 
 class ThreadPool{
 public:
-    ThreadPool(int threads) 
+    ThreadPool(size_t threads) 
     : stop_ { false }
     
     {
-        for(int i{0}; i < threads; ++i){
+        for(size_t i{0}; i < threads; ++i){
         workers_.emplace_back([this]{
             
             while(true){
