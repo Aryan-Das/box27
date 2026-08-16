@@ -182,7 +182,7 @@ public:
 
                 }
                 else if(connState.state == Content){
-                    size_t fullLength = connState.buffer.find("\r\n") + 2
+                    size_t fullLength = connState.buffer.find("\r\n\r\n") + 4
                                      + connState.http->contentLength;
                     if (connState.buffer.size() >= fullLength) {
                         
