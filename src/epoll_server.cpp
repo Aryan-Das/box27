@@ -23,6 +23,7 @@
 #include "mime.hpp"
 #include "thread_pool.hpp"
 #include "lru_cache.hpp"
+#include "sha256.hpp"
 
 constexpr int MAX = 1000;
 
@@ -129,7 +130,7 @@ public:
                 int err_code = errno; 
                 if(err_code != 11)
                     std::cerr << "recv failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
-            
+                
                 return false;
             }
             else if(bytes_received == 0){
@@ -209,80 +210,42 @@ public:
         if (connState.http != std::nullopt){
             std::stringstream httpResponse; 
             
-        
-    
             HTTPRequest req = connState.http.value();
-            std::string test_print = "Method: " + req.method + "; Path: " + req.path;
+            if(req.method == "GET"){
+                
             
-            std::string fileContents; 
-            auto cacheResult = cache_.get(req.path.substr(1));
-            
-            if(cacheResult == std::nullopt){
-                int fd = open(req.path.substr(1).c_str(), O_RDONLY);
-                if(fd < 0){
-                    int err_code = errno; 
-                    std::cerr << "open failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
-                    const char* errorMessage = "404 Error: File Not Found";
-                    httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
-                                << strlen(errorMessage) << "\r\n"
-                                << "Content-Type: " << "text/plain"
-                                << "\r\n\r\n" << errorMessage;
-                }else{
-                    struct stat fileInfo;
-                    if(fstat(fd, &fileInfo) == 0){
-                        size_t size = fileInfo.st_size; 
-                        httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " 
-                                << size << "\r\n"
-                                << "Content-Type: " << getMimeType(req.path) 
-                                << "\r\n\r\n";
-                        std::string httpResponseStr = httpResponse.str();
-                        size_t total_size = httpResponseStr.size();
-                        size_t bytes_written = 0;
-                        int eagainRetries = 10;
-                        while(bytes_written < total_size){
-                            ssize_t bytes_sent = write(clientFd, httpResponse.str().c_str() + bytes_written, total_size - bytes_written);
-                            if(bytes_sent < 0){
-                                int err_code = errno; 
-                                if(err_code == EAGAIN){
-                                    --eagainRetries;
-                                    std::cerr << "EAGAIN Retry";
-                                    if(eagainRetries <= 0){
-                                        close(clientFd);
-                                        {
-                                        std::lock_guard<std::mutex> guard(connectionStatesMutex_);
-                                        connectionStates_.erase(clientFd);
-                                        }
-                                        return false;
-                                    }
-                                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                                    continue;
-                                }
-                                else{
-                                    std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";  
-                                    close(clientFd);
-                                    {
-                                    std::lock_guard<std::mutex> guard(connectionStatesMutex_);
-                                    connectionStates_.erase(clientFd);
-                                    }
-                                    return false; 
-                                }                            
-                                
-                            }else{
-                                eagainRetries = 10;
-                            }
-                            if(bytes_sent == 0) break;
-                            bytes_written += bytes_sent;
-                        }
-                        if(bytes_written >= total_size){
-                            off_t offset = 0;
-                            size_t remaining_bytes = size;
-                            int eagainRetries = 500;
-                            while(remaining_bytes > 0){
-                                ssize_t sent = sendfile(clientFd, fd, &offset, size);
-                                if(sent < 0){
+                std::string fileContents; 
+                auto cacheResult = cache_.get(req.path.substr(1));
+                
+                if(cacheResult == std::nullopt){
+                    int fd = open(req.path.substr(1).c_str(), O_RDONLY);
+                    if(fd < 0){
+                        int err_code = errno; 
+                        std::cerr << "open failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+                        const char* errorMessage = "404 Error: File Not Found";
+                        httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
+                                    << strlen(errorMessage) << "\r\n"
+                                    << "Content-Type: " << "text/plain"
+                                    << "\r\n\r\n" << errorMessage;
+                    }else{
+                        struct stat fileInfo;
+                        if(fstat(fd, &fileInfo) == 0){
+                            size_t size = fileInfo.st_size; 
+                            httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " 
+                                    << size << "\r\n"
+                                    << "Content-Type: " << getMimeType(req.path) 
+                                    << "\r\n\r\n";
+                            std::string httpResponseStr = httpResponse.str();
+                            size_t total_size = httpResponseStr.size();
+                            size_t bytes_written = 0;
+                            int eagainRetries = 10;
+                            while(bytes_written < total_size){
+                                ssize_t bytes_sent = write(clientFd, httpResponse.str().c_str() + bytes_written, total_size - bytes_written);
+                                if(bytes_sent < 0){
                                     int err_code = errno; 
                                     if(err_code == EAGAIN){
                                         --eagainRetries;
+                                        std::cerr << "EAGAIN Retry";
                                         if(eagainRetries <= 0){
                                             close(clientFd);
                                             {
@@ -294,80 +257,188 @@ public:
                                         std::this_thread::sleep_for(std::chrono::milliseconds(1));
                                         continue;
                                     }
-                                    else {
-                                        std::cerr << "sendfile failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
-                                        const char* errorMessage = "404 Error: File Not Found";
-                                        httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
-                                            << strlen(errorMessage) << "\r\n"
-                                            << "Content-Type: " << "text/plain"
-                                            << "\r\n\r\n" << errorMessage;
-                                        break;
-                                    }
+                                    else{
+                                        std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";  
+                                        close(clientFd);
+                                        {
+                                        std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+                                        connectionStates_.erase(clientFd);
+                                        }
+                                        return false; 
+                                    }                            
                                     
                                 }else{
-                                    eagainRetries = 20;
+                                    eagainRetries = 10;
                                 }
-                                remaining_bytes -= sent;
+                                if(bytes_sent == 0) break;
+                                bytes_written += bytes_sent;
                             }
-                            if(remaining_bytes <= 0) sentfile = true;
+                            if(bytes_written >= total_size){
+                                off_t offset = 0;
+                                size_t remaining_bytes = size;
+                                int eagainRetries = 500;
+                                while(remaining_bytes > 0){
+                                    ssize_t sent = sendfile(clientFd, fd, &offset, size);
+                                    if(sent < 0){
+                                        int err_code = errno; 
+                                        if(err_code == EAGAIN){
+                                            --eagainRetries;
+                                            if(eagainRetries <= 0){
+                                                close(clientFd);
+                                                {
+                                                std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+                                                connectionStates_.erase(clientFd);
+                                                }
+                                                return false;
+                                            }
+                                            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                                            continue;
+                                        }
+                                        else {
+                                            std::cerr << "sendfile failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+                                            const char* errorMessage = "404 Error: File Not Found";
+                                            httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
+                                                << strlen(errorMessage) << "\r\n"
+                                                << "Content-Type: " << "text/plain"
+                                                << "\r\n\r\n" << errorMessage;
+                                            break;
+                                        }
+                                        
+                                    }else{
+                                        eagainRetries = 20;
+                                    }
+                                    remaining_bytes -= sent;
+                                }
+                                if(remaining_bytes <= 0) sentfile = true;
 
-                            
-
-                        }
-                        if(size < cachingThreshold_){
-                            std::ifstream file(req.path.substr(1));
-                            if (!file.is_open()) {
-                                std::cerr << "file opening failed: " << req.path << " \n" << std::endl;
-                            }
-                            else{                        
-                                std::stringstream fileBuf;
-                                fileBuf << file.rdbuf();
-                                fileContents = fileBuf.str();
-                                cache_.put(req.path.substr(1), fileContents);
                                 
+
                             }
+                            if(size < cachingThreshold_){
+                                std::ifstream file(req.path.substr(1));
+                                if (!file.is_open()) {
+                                    std::cerr << "file opening failed: " << req.path << " \n" << std::endl;
+                                }
+                                else{                        
+                                    std::stringstream fileBuf;
+                                    fileBuf << file.rdbuf();
+                                    fileContents = fileBuf.str();
+                                    cache_.put(req.path.substr(1), fileContents);
+                                    
+                                }
+                            }
+                            
                         }
+                        else{
+                            int err_code = errno; 
+                            std::cerr << "fstat failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+                            const char* errorMessage = "404 Error: File Not Found";
+                            httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
+                                    << strlen(errorMessage) << "\r\n"
+                                    << "Content-Type: " << "text/plain"
+                                    << "\r\n\r\n" << errorMessage;
+                        }
+                    }
+                    
                         
+                    
+                    
+                    close(fd);
+                    
+                } 
+                else{
+                    fileContents = std::move(cacheResult.value());
+                    httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " 
+                                    << fileContents.size() << "\r\n"
+                                    << "Content-Type: " << getMimeType(req.path) 
+                                    << "\r\n\r\n" << fileContents;
+                }
+                
+            
+                
+                if(!sentfile){
+                    int bytes_sent = write(clientFd, httpResponse.str().c_str(), httpResponse.str().size());
+                    if(bytes_sent < 0){
+                        int err_code = errno; 
+                        std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+                    }
+                }
+                
+            
+            }
+            else if(req.method == "POST"){
+                // post handling
+                std::string prefix = "/upload/";
+         
+                if(req.path.size() <= prefix.size() || !req.path.starts_with("/upload/")){
+                    httpResponse << "HTTP/1.1 400 Bad Request\r\n"
+                                    << "Content-Type: " << "text/plain"
+                                    << "\r\n\r\n"
+                                    << "Path must begin with /upload/";
+                }
+                else{
+                    std::string filename = req.path.substr(std::string("/upload/").size());
+                    size_t headerEnd = connState.buffer.find("\r\n\r\n");
+                    std::string body = connState.buffer.substr(headerEnd + 4);  
+                    int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    if(fd < 0){
+                        int err_code = errno; 
+                        std::cerr << "open failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+                        httpResponse << "HTTP/1.1 500 Internal Server Error\r\n"
+                                    << "Content-Type: " << "text/plain"
+                                    << "\r\n\r\n";
                     }
                     else{
-                        int err_code = errno; 
-                        std::cerr << "fstat failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
-                        const char* errorMessage = "404 Error: File Not Found";
-                        httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
-                                << strlen(errorMessage) << "\r\n"
-                                << "Content-Type: " << "text/plain"
-                                << "\r\n\r\n" << errorMessage;
+                        size_t total_size = body.size();
+                        size_t bytes_written = 0;
+                        while(bytes_written < total_size){
+                            ssize_t bytes_sent = write(fd, body.c_str() + bytes_written, total_size - bytes_written);
+                            if(bytes_sent < 0){
+                                int err_code = errno;
+                                std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";  
+                                httpResponse << "HTTP/1.1 500 Internal Server Error\r\n"
+                                    << "Content-Type: " << "text/plain"
+                                    << "\r\n\r\n";
+                                break;
+                            }
+                            bytes_written += bytes_sent;
+                        }
+                        if(bytes_written >= total_size){
+                            std::string hash = sha256Hex(body);
+                            std::string message = "Uploaded " + filename + ", sha256: " + hash;
+                            httpResponse << "HTTP/1.1 200 OK\r\n"
+                                    << "Content-Length: " << message.size() << "\r\n"
+                                    << "Content-Type: " << "text/plain"
+                                    << "\r\n\r\n"
+                                    << message << "\r\n";
+                        }
+
+
                     }
+                    close(fd);
                 }
-                
-                    
-                
-                
-                close(fd);
-                {
-                std::lock_guard<std::mutex> guard(connectionStatesMutex_);
-                connectionStates_.erase(clientFd);
-                }
-            } 
-            else{
-                fileContents = std::move(cacheResult.value());
-                httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " 
-                                << fileContents.size() << "\r\n"
-                                << "Content-Type: " << getMimeType(req.path) 
-                                << "\r\n\r\n" << fileContents;
-            }
-            
-        
-            
-            if(!sentfile){
+
                 int bytes_sent = write(clientFd, httpResponse.str().c_str(), httpResponse.str().size());
                 if(bytes_sent < 0){
                     int err_code = errno; 
                     std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
                 }
+                
+            }else{
+                
+                close(clientFd);
+                {
+                std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+                connectionStates_.erase(clientFd);
+                }
+                
             }
-            
-            
+            close(clientFd);
+            {
+            std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+            connectionStates_.erase(clientFd);
+            }
+            epoll_ctl(epollFd_, EPOLL_CTL_DEL, clientFd, nullptr);
             
         }   
         
