@@ -81,8 +81,10 @@ Requires Docker Desktop and VS Code with the Dev Containers extension.
    curl -X POST --data-binary @somefile.txt http://localhost:8080/upload/somefile.txt
    ```
 
-## Known limitations
 
+
+## Known limitations / Future Development
+- Code refactor
 - No HTTPS/TLS 
 - No HTTP keep-alive / connection reuse (every response closes the connection)
 - Auth, rate limiting not yet implemented
