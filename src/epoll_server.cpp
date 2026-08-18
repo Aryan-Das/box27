@@ -17,7 +17,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <optional>
-
+#include <pqxx/pqxx>
 
 #include "utils.hpp"
 #include "mime.hpp"
@@ -61,6 +61,53 @@ public:
         if(serverEv < 0){
             throw std::runtime_error("Failed to add server epoll_event");
         }
+        const char* dbUrl = std::getenv("DATABASE_URL");
+
+        if (!dbUrl) {
+            throw std::runtime_error("DATABASE_URL is not set");
+        }
+
+        constexpr int maxRetries = 10;
+
+        for (int attempt = 1; attempt <= maxRetries; ++attempt) {
+            try {
+                dbConnection_ = std::make_unique<pqxx::connection>(dbUrl);
+
+                std::cerr << "Database connected.\n";
+                break;
+                
+                
+            }
+            catch (const pqxx::failure& e) {
+                std::cerr << "Database connection failed: "
+                        << e.what()
+                        << " (attempt " << attempt
+                        << "/" << maxRetries << ")\n";
+
+                if (attempt == maxRetries) {
+                    throw std::runtime_error(
+                        "Failed to connect to database after 10 attempts"
+                    );
+                }
+
+                std::this_thread::sleep_for(std::chrono::seconds(2));
+            }
+        }
+        try{
+            pqxx::work txn(*dbConnection_);
+            txn.exec(
+                "CREATE TABLE IF NOT EXISTS files ("
+                "  filename TEXT PRIMARY KEY,"
+                "  size BIGINT NOT NULL,"
+                "  sha256 CHAR(64) NOT NULL,"
+                "  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()"
+                ")"
+            );
+            txn.commit();
+        } catch (const pqxx::failure& e) {
+            throw std::runtime_error("Failed to add table");
+        }
+        
     }
     void main(){
         signal(SIGPIPE, SIG_IGN);
@@ -371,51 +418,99 @@ public:
                 std::string prefix = "/upload/";
          
                 if(req.path.size() <= prefix.size() || !req.path.starts_with("/upload/")){
+                    std::string message = "Path must begin with /upload/";
                     httpResponse << "HTTP/1.1 400 Bad Request\r\n"
-                                    << "Content-Type: " << "text/plain"
-                                    << "\r\n\r\n"
-                                    << "Path must begin with /upload/";
-                }
-                else{
-                    std::string filename = req.path.substr(std::string("/upload/").size());
-                    size_t headerEnd = connState.buffer.find("\r\n\r\n");
-                    std::string body = connState.buffer.substr(headerEnd + 4);  
-                    int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                    if(fd < 0){
-                        int err_code = errno; 
-                        std::cerr << "open failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
-                        httpResponse << "HTTP/1.1 500 Internal Server Error\r\n"
-                                    << "Content-Type: " << "text/plain"
-                                    << "\r\n\r\n";
-                    }
-                    else{
-                        size_t total_size = body.size();
-                        size_t bytes_written = 0;
-                        while(bytes_written < total_size){
-                            ssize_t bytes_sent = write(fd, body.c_str() + bytes_written, total_size - bytes_written);
-                            if(bytes_sent < 0){
-                                int err_code = errno;
-                                std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";  
-                                httpResponse << "HTTP/1.1 500 Internal Server Error\r\n"
-                                    << "Content-Type: " << "text/plain"
-                                    << "\r\n\r\n";
-                                break;
-                            }
-                            bytes_written += bytes_sent;
-                        }
-                        if(bytes_written >= total_size){
-                            std::string hash = sha256Hex(body);
-                            std::string message = "Uploaded " + filename + ", sha256: " + hash;
-                            httpResponse << "HTTP/1.1 200 OK\r\n"
                                     << "Content-Length: " << message.size() << "\r\n"
                                     << "Content-Type: " << "text/plain"
                                     << "\r\n\r\n"
-                                    << message << "\r\n";
-                        }
-
-
+                                    << message;
+                }
+                else{
+                    std::string filename = req.path.substr(std::string("/upload/").size());
+                    if(filename.find('/') != std::string::npos || filename.find("..") != std::string::npos || filename.empty()){
+                        std::string message = "Path traversal is forbidden";
+                        httpResponse << "HTTP/1.1 400 Bad Request\r\n"
+                                        << "Content-Length: " << message.size() << "\r\n"
+                                        << "Content-Type: " << "text/plain"
+                                        << "\r\n\r\n"
+                                        << message;
                     }
-                    close(fd);
+                    else{
+                        size_t headerEnd = connState.buffer.find("\r\n\r\n");
+                        std::string body = connState.buffer.substr(headerEnd + 4);  
+                        int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        if(fd < 0){
+                            int err_code = errno; 
+                            std::cerr << "open failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
+                            std::string message = "Internal Sever Error";
+                            httpResponse << "HTTP/1.1 500 Internal Server Error\r\n"
+                                            << "Content-Length: " << message.size() << "\r\n"
+                                            << "Content-Type: " << "text/plain"
+                                            << "\r\n\r\n"
+                                            << message;
+                        }
+                        else{
+                            size_t total_size = body.size();
+                            size_t bytes_written = 0;
+                            while(bytes_written < total_size){
+                                ssize_t bytes_sent = write(fd, body.c_str() + bytes_written, total_size - bytes_written);
+                                if(bytes_sent < 0){
+                                    int err_code = errno;
+                                    std::cerr << "write failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";  
+                                    std::string message = "Internal Sever Error";
+                                    httpResponse << "HTTP/1.1 500 Internal Server Error\r\n"
+                                                    << "Content-Length: " << message.size() << "\r\n"
+                                                    << "Content-Type: " << "text/plain"
+                                                    << "\r\n\r\n"
+                                                    << message;
+                                    break;
+                                }
+                                bytes_written += bytes_sent;
+                            }
+                            if(bytes_written >= total_size){
+                                std::string hash = sha256Hex(body);
+                                bool dbSuccess = false;
+                                {
+                                    std::lock_guard<std::mutex> guard(dbMutex_);
+                                    try {
+                                        pqxx::work txn(*dbConnection_);
+                                        txn.exec_params(
+                                            "INSERT INTO files (filename, size, sha256) VALUES ($1, $2, $3) "
+                                            "ON CONFLICT (filename) DO UPDATE SET size = $2, sha256 = $3, uploaded_at = now()",
+                                            filename, total_size, hash
+                                        );
+                                        txn.commit();
+                                        dbSuccess = true;
+                                    } catch (const pqxx::failure& e) {
+                                        std::cerr << "DB insert failed: " << e.what() << "\n";
+                                    }
+                                }
+
+                                if(!dbSuccess){
+                                    if(unlink(filename.c_str()) < 0){
+                                        int err_code = errno;
+                                        std::cerr << "unlink failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";  
+                                    }
+                                    std::string message = "Internal Server Error";
+                                    httpResponse << "HTTP/1.1 500 Internal Server Error\r\n"
+                                                    << "Content-Length: " << message.size() << "\r\n"
+                                                    << "Content-Type: " << "text/plain"
+                                                    << "\r\n\r\n"
+                                                    << message;
+                                } else {
+                                    std::string message = "Uploaded " + filename + ", sha256: " + hash;
+                                    httpResponse << "HTTP/1.1 200 OK\r\n"
+                                                    << "Content-Length: " << message.size() << "\r\n"
+                                                    << "Content-Type: " << "text/plain"
+                                                    << "\r\n\r\n"
+                                                    << message;
+                                }
+                            }
+
+
+                        }
+                        close(fd);
+                    }
                 }
 
                 int bytes_sent = write(clientFd, httpResponse.str().c_str(), httpResponse.str().size());
@@ -426,11 +521,7 @@ public:
                 
             }else{
                 
-                close(clientFd);
-                {
-                std::lock_guard<std::mutex> guard(connectionStatesMutex_);
-                connectionStates_.erase(clientFd);
-                }
+                
                 
             }
             close(clientFd);
@@ -473,6 +564,10 @@ private:
     std::unordered_set<int> fdsBeingProcessed_;
     ThreadPool threadPool_;
     std::mutex fdsMutex_;
+
+    std::unique_ptr<pqxx::connection> dbConnection_;
+    std::mutex dbMutex_;
+    
     struct HTTPRequest{
         std::string method;
         std::string path;
