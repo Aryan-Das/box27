@@ -84,8 +84,8 @@ Requires Docker Desktop and VS Code with the Dev Containers extension.
 - No HTTPS/TLS (deferred: natural follow-on extension)
 - No HTTP keep-alive / connection reuse (every response closes the connection)
 - Auth, rate limiting not yet implemented
-- Non-blocking write backpressure (`EAGAIN` on `sendfile()`/`write()`) is handled via bounded synchronous retry rather than full `EPOLLOUT`-driven async writes: a known, deliberate scope tradeoff given project timeline
-- LRU cache eviction is entry-count-bounded, not byte-bounded (mitigated by a size threshold that excludes large files from caching entirely)
+- Non-blocking write backpressure (`EAGAIN` on `sendfile()`/`write()`) is handled via bounded synchronous retry instead of full `EPOLLOUT` async writes
+- LRU cache eviction is entry-count-bounded, not byte-bounded
 
 ## Tech stack
 

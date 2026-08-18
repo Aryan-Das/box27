@@ -18,12 +18,15 @@
 #include <mutex>
 #include <optional>
 #include <pqxx/pqxx>
+#include <filesystem>
 
 #include "utils.hpp"
 #include "mime.hpp"
 #include "thread_pool.hpp"
 #include "lru_cache.hpp"
 #include "sha256.hpp"
+
+namespace fs = std::filesystem;
 
 constexpr int MAX = 1000;
 
@@ -32,7 +35,7 @@ constexpr int MAX = 1000;
 
 class Server{
 public:
-    Server(uint32_t port, size_t threads, size_t cacheCapacity)
+    Server(uint32_t port, size_t threads, size_t cacheCapacity, std::string storageRoot)
     : fd_ { socket(AF_INET, SOCK_STREAM, 0) }
     , epollFd_ {epoll_create1(0)}
     , serverAddress_ { }
@@ -40,6 +43,7 @@ public:
     , running_ { true }
     , threadPool_ { threads }
     , cache_ {cacheCapacity}
+    , storageRoot_ {storageRoot}
     {
         serverAddress_.sin_family = AF_INET;
         serverAddress_.sin_port = htons(port);
@@ -263,9 +267,18 @@ public:
             
                 std::string fileContents; 
                 auto cacheResult = cache_.get(req.path.substr(1));
+             
                 
-                if(cacheResult == std::nullopt){
-                    int fd = open(req.path.substr(1).c_str(), O_RDONLY);
+                if(!validPath(req.path.substr(1))){
+                    std::string message = "Invalid Path";
+                    httpResponse << "HTTP/1.1 400 Bad Request\r\n"
+                                    << "Content-Length: " << message.size() << "\r\n"
+                                    << "Content-Type: " << "text/plain"
+                                    << "\r\n\r\n"
+                                    << message;
+                }
+                else if(cacheResult == std::nullopt){
+                    int fd = open((storageRoot_ + req.path.substr(1)).c_str(), O_RDONLY);
                     if(fd < 0){
                         int err_code = errno; 
                         std::cerr << "open failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
@@ -362,7 +375,7 @@ public:
 
                             }
                             if(size < cachingThreshold_){
-                                std::ifstream file(req.path.substr(1));
+                                std::ifstream file(storageRoot_ + req.path.substr(1));
                                 if (!file.is_open()) {
                                     std::cerr << "file opening failed: " << req.path << " \n" << std::endl;
                                 }
@@ -417,7 +430,7 @@ public:
                 // post handling
                 std::string prefix = "/upload/";
          
-                if(req.path.size() <= prefix.size() || !req.path.starts_with("/upload/")){
+                if(req.path.size() <= prefix.size() || !req.path.starts_with(prefix)){
                     std::string message = "Path must begin with /upload/";
                     httpResponse << "HTTP/1.1 400 Bad Request\r\n"
                                     << "Content-Length: " << message.size() << "\r\n"
@@ -426,9 +439,9 @@ public:
                                     << message;
                 }
                 else{
-                    std::string filename = req.path.substr(std::string("/upload/").size());
-                    if(filename.find('/') != std::string::npos || filename.find("..") != std::string::npos || filename.empty()){
-                        std::string message = "Path traversal is forbidden";
+                    std::string filename = req.path.substr(prefix.size());
+                    if(!validPath(filename)){
+                        std::string message = "Invalid Path";
                         httpResponse << "HTTP/1.1 400 Bad Request\r\n"
                                         << "Content-Length: " << message.size() << "\r\n"
                                         << "Content-Type: " << "text/plain"
@@ -438,7 +451,7 @@ public:
                     else{
                         size_t headerEnd = connState.buffer.find("\r\n\r\n");
                         std::string body = connState.buffer.substr(headerEnd + 4);  
-                        int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        int fd = open((storageRoot_ + filename).c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
                         if(fd < 0){
                             int err_code = errno; 
                             std::cerr << "open failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
@@ -487,7 +500,7 @@ public:
                                 }
 
                                 if(!dbSuccess){
-                                    if(unlink(filename.c_str()) < 0){
+                                    if(unlink((storageRoot_ + filename).c_str()) < 0){
                                         int err_code = errno;
                                         std::cerr << "unlink failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";  
                                     }
@@ -554,7 +567,7 @@ private:
     int fd_;
     int epollFd_;
     sockaddr_in serverAddress_;
-
+    std::string storageRoot_;
     struct epoll_event ev;
     struct epoll_event evList[MAX];
 
@@ -673,11 +686,23 @@ private:
 
         return ParseResult{0, req};
     }
+
+    bool validPath(std::string filename){
+        if(filename.find('/') != std::string::npos || filename.find("..") != std::string::npos || filename.empty()){
+            return false;
+        }
+        return true;
+    }
 };
 
 
 int main() {
-    Server server(8080, 16, 1000);
+    fs::path dir_path = "./storage/";
+    std::error_code ec;
+    if (!fs::create_directories(dir_path, ec) && ec) {
+        throw std::runtime_error("Failed to create storage directory");
+    }
+    Server server(8080, 16, 1000, "./storage/");
     server.main();
     return 0;
 }
