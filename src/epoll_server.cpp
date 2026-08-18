@@ -206,7 +206,8 @@ public:
                         const char* errorMessage = "400 Error: Bad Request";
                         httpResponse << "HTTP/1.1 400 BAD REQUEST\r\nContent-Length: "
                                     << strlen(errorMessage) << "\r\n"
-                                    << "Content-Type: " << "text/plain" 
+                                    << "Content-Type: " << "text/plain" << "\r\n"
+                                    << "Connection: close"
                                     << "\r\n\r\n" 
                                     << errorMessage;
                         int bytes_sent = write(clientFd, httpResponse.str().c_str(), httpResponse.str().size());
@@ -273,7 +274,8 @@ public:
                     std::string message = "Invalid Path";
                     httpResponse << "HTTP/1.1 400 Bad Request\r\n"
                                     << "Content-Length: " << message.size() << "\r\n"
-                                    << "Content-Type: " << "text/plain"
+                                    << "Content-Type: " << "text/plain" << "\r\n"
+                                    << "Connection: close"
                                     << "\r\n\r\n"
                                     << message;
                 }
@@ -285,7 +287,8 @@ public:
                         const char* errorMessage = "404 Error: File Not Found";
                         httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
                                     << strlen(errorMessage) << "\r\n"
-                                    << "Content-Type: " << "text/plain"
+                                    << "Content-Type: " << "text/plain" << "\r\n"
+                                    << "Connection: close"
                                     << "\r\n\r\n" << errorMessage;
                     }else{
                         struct stat fileInfo;
@@ -293,7 +296,8 @@ public:
                             size_t size = fileInfo.st_size; 
                             httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " 
                                     << size << "\r\n"
-                                    << "Content-Type: " << getMimeType(req.path) 
+                                    << "Content-Type: " << getMimeType(req.path) << "\r\n"
+                                    << "Connection: close" 
                                     << "\r\n\r\n";
                             std::string httpResponseStr = httpResponse.str();
                             size_t total_size = httpResponseStr.size();
@@ -359,7 +363,8 @@ public:
                                             const char* errorMessage = "404 Error: File Not Found";
                                             httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
                                                 << strlen(errorMessage) << "\r\n"
-                                                << "Content-Type: " << "text/plain"
+                                                << "Content-Type: " << "text/plain" << "\r\n"
+                                                << "Connection: close"
                                                 << "\r\n\r\n" << errorMessage;
                                             break;
                                         }
@@ -395,7 +400,8 @@ public:
                             const char* errorMessage = "404 Error: File Not Found";
                             httpResponse << "HTTP/1.1 404 NOT FOUND\r\nContent-Length: " 
                                     << strlen(errorMessage) << "\r\n"
-                                    << "Content-Type: " << "text/plain"
+                                    << "Content-Type: " << "text/plain" << "\r\n"
+                                    << "Connection: close"
                                     << "\r\n\r\n" << errorMessage;
                         }
                     }
@@ -410,7 +416,8 @@ public:
                     fileContents = std::move(cacheResult.value());
                     httpResponse << "HTTP/1.1 200 OK\r\nContent-Length: " 
                                     << fileContents.size() << "\r\n"
-                                    << "Content-Type: " << getMimeType(req.path) 
+                                    << "Content-Type: " << getMimeType(req.path)  << "\r\n"
+                                    << "Connection: close"
                                     << "\r\n\r\n" << fileContents;
                 }
                 
@@ -434,7 +441,8 @@ public:
                     std::string message = "Path must begin with /upload/";
                     httpResponse << "HTTP/1.1 400 Bad Request\r\n"
                                     << "Content-Length: " << message.size() << "\r\n"
-                                    << "Content-Type: " << "text/plain"
+                                    << "Content-Type: " << "text/plain" << "\r\n"
+                                    << "Connection: close"
                                     << "\r\n\r\n"
                                     << message;
                 }
@@ -444,7 +452,8 @@ public:
                         std::string message = "Invalid Path";
                         httpResponse << "HTTP/1.1 400 Bad Request\r\n"
                                         << "Content-Length: " << message.size() << "\r\n"
-                                        << "Content-Type: " << "text/plain"
+                                        << "Content-Type: " << "text/plain" << "\r\n"
+                                        << "Connection: close"
                                         << "\r\n\r\n"
                                         << message;
                     }
@@ -458,7 +467,8 @@ public:
                             std::string message = "Internal Sever Error";
                             httpResponse << "HTTP/1.1 500 Internal Server Error\r\n"
                                             << "Content-Length: " << message.size() << "\r\n"
-                                            << "Content-Type: " << "text/plain"
+                                            << "Content-Type: " << "text/plain" << "\r\n"
+                                            << "Connection: close"  
                                             << "\r\n\r\n"
                                             << message;
                         }
@@ -473,7 +483,8 @@ public:
                                     std::string message = "Internal Sever Error";
                                     httpResponse << "HTTP/1.1 500 Internal Server Error\r\n"
                                                     << "Content-Length: " << message.size() << "\r\n"
-                                                    << "Content-Type: " << "text/plain"
+                                                    << "Content-Type: " << "text/plain" << "\r\n"
+                                                     << "Connection: close"
                                                     << "\r\n\r\n"
                                                     << message;
                                     break;
@@ -507,14 +518,16 @@ public:
                                     std::string message = "Internal Server Error";
                                     httpResponse << "HTTP/1.1 500 Internal Server Error\r\n"
                                                     << "Content-Length: " << message.size() << "\r\n"
-                                                    << "Content-Type: " << "text/plain"
+                                                    << "Content-Type: " << "text/plain" << "\r\n"
+                                                    << "Connection: close"
                                                     << "\r\n\r\n"
                                                     << message;
                                 } else {
                                     std::string message = "Uploaded " + filename + ", sha256: " + hash;
                                     httpResponse << "HTTP/1.1 200 OK\r\n"
                                                     << "Content-Length: " << message.size() << "\r\n"
-                                                    << "Content-Type: " << "text/plain"
+                                                    << "Content-Type: " << "text/plain" << "\r\n"
+                                                    << "Connection: close"
                                                     << "\r\n\r\n"
                                                     << message;
                                 }

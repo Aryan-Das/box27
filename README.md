@@ -49,7 +49,9 @@ epoll event loop (single thread, level-triggered)
 
 ## Performance
 
-All benchmarks via `wrk -t12 -c400 -d30s` on an 8-core devcontainer. Numbers reflect the actual investigative process: each optimization was validated by isolating and measuring its specific effect, not assumed.
+Currently in the process of benchmarking with a more realistic/diverse workload of files.
+
+All benchmarks below via `wrk -t12 -c400 -d30s` on an 8-core devcontainer.
 
 | Stage | Result |
 |---|---|
@@ -59,14 +61,14 @@ All benchmarks via `wrk -t12 -c400 -d30s` on an 8-core devcontainer. Numbers ref
 | LRU cache (warm, repeated small-file requests) | 595,000+ req/sec, ~823µs avg latency: **~20x throughput / ~16x latency** improvement over uncached disk reads |
 | `sendfile()` on a 10MB file vs. `read()`+`write()` | 1,235 req/sec vs. 22 req/sec: **~56x throughput improvement**, 12+ GB/sec sustained transfer under heavy concurrent load |
 
-Full investigative detail: including root causes found and fixed along the way (a stale-closure race in the thread pool, `SIGPIPE` handling, partial-write accounting, connection-state lifecycle bugs): is documented in project notes and available on request; this README keeps the headline numbers.
+
 
 ## Running locally
 
 Requires Docker Desktop and VS Code with the Dev Containers extension.
 
 1. Clone the repo and open it in VS Code
-2. **Reopen in Container** when prompted (builds the app container + a Postgres 16 sidecar via Docker Compose)
+2. **Reopen in Container** when prompted (builds the app container + a Postgres 16 image via Docker Compose)
 3. Inside the container:
    ```bash
    cmake -B build
@@ -81,7 +83,7 @@ Requires Docker Desktop and VS Code with the Dev Containers extension.
 
 ## Known limitations
 
-- No HTTPS/TLS (deferred: natural follow-on extension)
+- No HTTPS/TLS 
 - No HTTP keep-alive / connection reuse (every response closes the connection)
 - Auth, rate limiting not yet implemented
 - Non-blocking write backpressure (`EAGAIN` on `sendfile()`/`write()`) is handled via bounded synchronous retry instead of full `EPOLLOUT` async writes
