@@ -165,23 +165,28 @@ public:
     
     bool handleClient(int clientFd){
         FdGuard fdGuard {fdsBeingProcessed_, fdsMutex_, clientFd};
-   
+        int lockCounter = 0;
         ConnectionState connState;
+
         {
-        std::lock_guard<std::mutex> guard(connectionStatesMutex_);
-        if(!connectionStates_.contains(clientFd)){
-            connectionStates_[clientFd] = ConnectionState{};
-        }
-        connState = connectionStates_[clientFd];
+            std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+            auto it = connectionStates_.find(clientFd);
+            if (it != connectionStates_.end()) {
+                connState = std::move(it->second);
+                connectionStates_.erase(it); 
+            }
         }
         if(connState.state != Complete){
             char buffer[1024] = { 0 };
             int bytes_received = recv(clientFd, buffer, sizeof(buffer), 0);
             if(bytes_received < 0){
                 int err_code = errno; 
-                if(err_code != 11)
+                if(err_code != EAGAIN && err_code != EWOULDBLOCK)
                     std::cerr << "recv failed with error: " << std::strerror(err_code) << " (code: " << err_code << ")\n";
-                
+                {
+                    std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+                    connectionStates_[clientFd] = std::move(connState);
+                }
                 return false;
             }
             else if(bytes_received == 0){
@@ -189,6 +194,7 @@ public:
                 close(clientFd);
                 {
                 std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+                std::cerr << (++lockCounter);
                 connectionStates_.erase(clientFd);
                 }
                 
@@ -218,6 +224,7 @@ public:
                                 close(clientFd);
                                 {
                                 std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+                                std::cerr << (++lockCounter);
                                 connectionStates_.erase(clientFd);
                                 }
                                 return false;
@@ -226,6 +233,7 @@ public:
                         }
                         {
                         std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+                        std::cerr << (++lockCounter);
                         connectionStates_[clientFd] = connState;
                         }
                         return false;
@@ -245,12 +253,13 @@ public:
                     }
                 }
             }
-            {
-            std::lock_guard<std::mutex> guard(connectionStatesMutex_);
-            connectionStates_[clientFd] = connState;
-            }
-            if (connState.state != Complete)
+            if(connState.state != Complete){
+                std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+
+                connectionStates_[clientFd] = std::move(connState);
+
                 return false;
+            }
 
             
             
@@ -314,6 +323,7 @@ public:
                                             close(clientFd);
                                             {
                                             std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+                                            std::cerr << (++lockCounter);
                                             connectionStates_.erase(clientFd);
                                             }
                                             return false;
@@ -326,6 +336,7 @@ public:
                                         close(clientFd);
                                         {
                                         std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+                                        std::cerr << (++lockCounter);
                                         connectionStates_.erase(clientFd);
                                         }
                                         return false; 
@@ -351,6 +362,7 @@ public:
                                                 close(clientFd);
                                                 {
                                                 std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+                                                std::cerr << (++lockCounter);
                                                 connectionStates_.erase(clientFd);
                                                 }
                                                 return false;
@@ -553,6 +565,7 @@ public:
             close(clientFd);
             {
             std::lock_guard<std::mutex> guard(connectionStatesMutex_);
+            std::cerr << (++lockCounter);
             connectionStates_.erase(clientFd);
             }
             epoll_ctl(epollFd_, EPOLL_CTL_DEL, clientFd, nullptr);
