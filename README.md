@@ -1,19 +1,19 @@
 # Cloud File Service
 
-A high-performance HTTP file service built from scratch in C++20. Raw sockets, an epoll event loop, a custom thread pool, an LRU cache, zero-copy file transfer via `sendfile()`, and PostgreSQL-backed metadata
+A high-performance HTTP file service built from scratch in C++20. Raw sockets, an epoll event loop, a custom thread pool, an LRU cache, zero-copy file transfer via `sendfile()`, and metadata stored in PostgreSQL.
 
 ## Features
 
-- **Custom HTTP/1.1 server**: hand-written request parsing (request line + headers), no third-party HTTP library
+- **Custom HTTP/1.1 server**: hand-written request parsing (request line + headers)
 - **epoll-based non-blocking event loop**: single-threaded reactor handling thousands of concurrent connections
 - **Thread pool**: fixed worker pool with a condition-variable-based job queue, decoupling connection acceptance from request processing
-- **Streaming request body support**: correctly accumulates request bodies across multiple `recv()` calls via `Content-Length`-driven per-connection state, not just single-shot reads
+- **Streaming request body support**: correctly accumulates request bodies across multiple `recv()` calls 
 - **In-memory LRU cache**: O(1) get/put/evict via `std::list` + `std::unordered_map`, with a size threshold so large files bypass the cache entirely and go straight to disk
 - **Zero-copy large file serving** via `sendfile()`, with bounded-retry backpressure handling for non-blocking sockets
 - **File upload**: `POST /upload/<filename>`, with SHA-256 checksumming (OpenSSL) and path-traversal protection
 - **PostgreSQL metadata store** (via `libpqxx`): tracks filename, size, SHA-256, and upload timestamp per file, with upsert-on-reupload and atomic rollback (uploaded file is deleted from disk if the metadata insert fails)
 - **Dockerized dev environment**: Linux devcontainer (for `epoll`/`sendfile` access from macOS) with Postgres as a sibling service via Docker Compose
-- **CI** via GitHub Actions (build verification on every push)
+- **CI** via GitHub Actions 
 
 ## Architecture
 
